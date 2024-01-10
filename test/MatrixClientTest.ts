@@ -1,5 +1,6 @@
 import * as tmp from "tmp";
 import * as simple from "simple-mock";
+import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
 import {
     EventKind,
@@ -21,7 +22,7 @@ import {
     ServerVersions,
     setRequestFn,
 } from "../src";
-import { createTestClient, expectArrayEquals, TEST_DEVICE_ID } from "./TestUtils";
+import { createTestClient, expectArrayEquals, testCryptoStores, TEST_DEVICE_ID } from "./TestUtils";
 
 tmp.setGracefulCleanup();
 
@@ -51,7 +52,7 @@ describe('MatrixClient', () => {
             const homeserverUrl = "https://example.org";
             const accessToken = "example_token";
 
-            const client = new MatrixClient(homeserverUrl, accessToken, null, new RustSdkCryptoStorageProvider(tmp.dirSync().name));
+            const client = new MatrixClient(homeserverUrl, accessToken, null, new RustSdkCryptoStorageProvider(tmp.dirSync().name, StoreType.Sled));
             expect(client.crypto).toBeDefined();
         });
 
@@ -1177,8 +1178,14 @@ describe('MatrixClient', () => {
             http.when("POST", "/_matrix/client/v3/user").respond(200, (path, content) => {
                 expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`);
                 expect(content).toMatchObject(filter);
-                client.stop(); // avoid a sync early
                 return { filter_id: filterId };
+            });
+
+            // noinspection TypeScriptValidateJSTypes
+            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
+                expect(req.queryParams.filter).toBe(filterId);
+                client.stop();
+                return { next_batch: "123" };
             });
 
             await Promise.all([client.start(filter), http.flushAllExpected()]);
@@ -1215,8 +1222,14 @@ describe('MatrixClient', () => {
             http.when("POST", "/_matrix/client/v3/user").respond(200, (path, content) => {
                 expect(path).toEqual(`${hsUrl}/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`);
                 expect(content).toMatchObject(filter);
-                client.stop(); // avoid a sync early
                 return { filter_id: filterId };
+            });
+
+            // noinspection TypeScriptValidateJSTypes
+            http.when("GET", "/_matrix/client/v3/sync").respond(200, (path, content, req) => {
+                expect(req.queryParams.filter).toBe(filterId);
+                client.stop();
+                return { next_batch: "123" };
             });
 
             await Promise.all([client.start(filter), http.flushAllExpected()]);
@@ -1428,6 +1441,7 @@ describe('MatrixClient', () => {
                     type: "m.room.member",
                     state_key: userId,
                     unsigned: { age: 0 },
+                    content: { membership: "leave" },
                 },
             ];
 
@@ -1485,16 +1499,19 @@ describe('MatrixClient', () => {
                     type: "m.room.member",
                     state_key: userId,
                     unsigned: { age: 2 },
+                    content: { membership: "leave" },
                 },
                 {
                     type: "m.room.member",
                     state_key: userId,
                     unsigned: { age: 1 },
+                    content: { membership: "leave" },
                 },
                 {
                     type: "m.room.member",
                     state_key: userId,
                     unsigned: { age: 3 },
+                    content: { membership: "leave" },
                 },
             ];
 
@@ -1523,16 +1540,19 @@ describe('MatrixClient', () => {
                     type: "m.room.not_member",
                     state_key: userId,
                     unsigned: { age: 1 },
+                    content: { membership: "leave" },
                 },
                 {
                     type: "m.room.member",
                     state_key: userId,
                     unsigned: { age: 1 },
+                    content: { membership: "leave" },
                 },
                 {
                     type: "m.room.member",
                     state_key: userId + "_wrong_member",
                     unsigned: { age: 1 },
+                    content: { membership: "leave" },
                 },
             ];
 
@@ -1567,6 +1587,7 @@ describe('MatrixClient', () => {
                 //     type: "m.room.member",
                 //     state_key: userId,
                 //     unsigned: {age: 1},
+                //     content: { membership: "leave" },
                 // },
                 {
                     type: "m.room.member",
@@ -1599,6 +1620,7 @@ describe('MatrixClient', () => {
                 {
                     type: "m.room.member",
                     state_key: userId,
+                    content: { membership: "leave" },
                 },
             ];
 
@@ -1780,7 +1802,6 @@ describe('MatrixClient', () => {
             const userId = "@syncing:example.org";
             const roomId = "!testing:example.org";
             const events = [
-                // TODO: Surely the 'invite' membership should be in some sort of content field?
                 {
                     type: "m.room.member",
                     state_key: userId,
@@ -1809,16 +1830,25 @@ describe('MatrixClient', () => {
 
             const userId = "@syncing:example.org";
             const roomId = "!testing:example.org";
+            const events = [
+                {
+                    type: "m.room.member",
+                    state_key: userId,
+                    unsigned: { age: 0 },
+                    content: { membership: "join" },
+                },
+            ];
 
             client.userId = userId;
 
-            const spy = simple.stub().callFn((rid) => {
+            const spy = simple.stub().callFn((rid, ev) => {
+                expect(ev).toMatchObject(events[0]);
                 expect(rid).toEqual(roomId);
             });
             realClient.on("room.join", spy);
 
             const roomsObj = {};
-            roomsObj[roomId] = {};
+            roomsObj[roomId] = { timeline: { events: events } };
             await client.processSync({ rooms: { join: roomsObj } });
             expect(spy.callCount).toBe(1);
         });
@@ -1858,16 +1888,25 @@ describe('MatrixClient', () => {
 
             const userId = "@syncing:example.org";
             const roomId = "!testing:example.org";
+            const events = [
+                {
+                    type: "m.room.member",
+                    state_key: userId,
+                    unsigned: { age: 0 },
+                    content: { membership: "join" },
+                },
+            ];
 
             client.userId = userId;
 
-            const spy = simple.stub().callFn((rid) => {
+            const spy = simple.stub().callFn((rid, ev) => {
+                expect(ev).toMatchObject(events[0]);
                 expect(rid).toEqual(roomId);
             });
             realClient.on("room.join", spy);
 
             const roomsObj = {};
-            roomsObj[roomId] = {};
+            roomsObj[roomId] = { timeline: { events: events } };
             await client.processSync({ rooms: { join: roomsObj } });
             expect(spy.callCount).toBe(1);
             await client.processSync({ rooms: { join: roomsObj } });
@@ -1914,6 +1953,12 @@ describe('MatrixClient', () => {
             const roomId = "!testing:example.org";
             const events = [
                 {
+                    type: "m.room.member",
+                    state_key: userId,
+                    unsigned: { age: 0 },
+                    content: { membership: "join" },
+                },
+                {
                     type: "m.room.not_message",
                     content: { body: "hello world 1" },
                 },
@@ -1958,7 +2003,7 @@ describe('MatrixClient', () => {
             expect(inviteSpy.callCount).toBe(0);
             expect(leaveSpy.callCount).toBe(0);
             expect(messageSpy.callCount).toBe(2);
-            expect(eventSpy.callCount).toBe(4);
+            expect(eventSpy.callCount).toBe(5);
         });
 
         it('should process tombstone events', async () => {
@@ -1968,6 +2013,12 @@ describe('MatrixClient', () => {
             const userId = "@syncing:example.org";
             const roomId = "!testing:example.org";
             const events = [
+                {
+                    type: "m.room.member",
+                    state_key: userId,
+                    unsigned: { age: 0 },
+                    content: { membership: "join" },
+                },
                 {
                     type: "m.room.tombstone",
                     content: { body: "hello world 1" },
@@ -2007,7 +2058,7 @@ describe('MatrixClient', () => {
             expect(inviteSpy.callCount).toBe(0);
             expect(leaveSpy.callCount).toBe(0);
             expect(archiveSpy.callCount).toBe(1);
-            expect(eventSpy.callCount).toBe(2);
+            expect(eventSpy.callCount).toBe(3);
         });
 
         it('should process create events with a predecessor', async () => {
@@ -2017,6 +2068,12 @@ describe('MatrixClient', () => {
             const userId = "@syncing:example.org";
             const roomId = "!testing:example.org";
             const events = [
+                {
+                    type: "m.room.member",
+                    state_key: userId,
+                    unsigned: { age: 0 },
+                    content: { membership: "join" },
+                },
                 {
                     type: "m.room.tombstone",
                     content: { body: "hello world 1" },
@@ -2056,7 +2113,7 @@ describe('MatrixClient', () => {
             expect(inviteSpy.callCount).toBe(0);
             expect(leaveSpy.callCount).toBe(0);
             expect(upgradedSpy.callCount).toBe(1);
-            expect(eventSpy.callCount).toBe(2);
+            expect(eventSpy.callCount).toBe(3);
         });
 
         it('should send events through a processor', async () => {
@@ -2235,8 +2292,8 @@ describe('MatrixClient', () => {
             expect(eventSpy.callCount).toBe(5);
         });
 
-        it('should process crypto if enabled', async () => {
-            const { client: realClient } = createTestClient(null, "@alice:example.org", true);
+        it('should process crypto if enabled', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client: realClient } = createTestClient(null, "@alice:example.org", cryptoStoreType);
             const client = <ProcessSyncClient>(<any>realClient);
 
             const sync = {
@@ -2265,7 +2322,7 @@ describe('MatrixClient', () => {
 
             await client.processSync(sync);
             expect(spy.callCount).toBe(1);
-        });
+        }));
     });
 
     describe('getEvent', () => {
@@ -2313,8 +2370,8 @@ describe('MatrixClient', () => {
             expect(result["processed"]).toBeTruthy();
         });
 
-        it('should try decryption', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try decryption', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!abc123:example.org";
             const eventId = "$example:example.org";
@@ -2355,10 +2412,10 @@ describe('MatrixClient', () => {
             expect(processSpy.callCount).toBe(2);
             expect(isEncSpy.callCount).toBe(1);
             expect(decryptSpy.callCount).toBe(1);
-        });
+        }));
 
-        it('should not try decryption in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try decryption in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!abc123:example.org";
             const eventId = "$example:example.org";
@@ -2399,7 +2456,7 @@ describe('MatrixClient', () => {
             expect(processSpy.callCount).toBe(1);
             expect(isEncSpy.callCount).toBe(1);
             expect(decryptSpy.callCount).toBe(0);
-        });
+        }));
     });
 
     describe('getRawEvent', () => {
@@ -2447,8 +2504,8 @@ describe('MatrixClient', () => {
             expect(result["processed"]).toBeTruthy();
         });
 
-        it('should not try decryption in any rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try decryption in any rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!abc123:example.org";
             const eventId = "$example:example.org";
@@ -2489,7 +2546,7 @@ describe('MatrixClient', () => {
             expect(processSpy.callCount).toBe(1);
             expect(isEncSpy.callCount).toBe(0);
             expect(decryptSpy.callCount).toBe(0);
-        });
+        }));
     });
 
     describe('getRoomState', () => {
@@ -3340,6 +3397,21 @@ describe('MatrixClient', () => {
 
             await Promise.all([client.leaveRoom(roomId), http.flushAllExpected()]);
         });
+        it('should include a reason if provided', async () => {
+            const { client, http, hsUrl } = createTestClient();
+
+            const roomId = "!testing:example.org";
+            const reason = "I am done testing here";
+
+            // noinspection TypeScriptValidateJSTypes
+            http.when("POST", "/_matrix/client/v3/rooms").respond(200, (path, content) => {
+                expect(content).toEqual({ reason });
+                expect(path).toEqual(`${hsUrl}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`);
+                return {};
+            });
+
+            await Promise.all([client.leaveRoom(roomId, reason), http.flushAllExpected()]);
+        });
     });
 
     describe('forgetRoom', () => {
@@ -3439,8 +3511,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3490,10 +3562,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyText(roomId, originalEvent, replyText, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3533,7 +3605,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyText(roomId, originalEvent, replyText, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
         it('should use encoded plain text as the HTML component', async () => {
             const { client, http, hsUrl } = createTestClient();
@@ -3619,8 +3691,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3670,10 +3742,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyHtmlText(roomId, originalEvent, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3713,7 +3785,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyHtmlText(roomId, originalEvent, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('replyNotice', () => {
@@ -3758,8 +3830,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3809,10 +3881,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyNotice(roomId, originalEvent, replyText, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3852,7 +3924,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyNotice(roomId, originalEvent, replyText, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
         it('should use encoded plain text as the HTML component', async () => {
             const { client, http, hsUrl } = createTestClient();
@@ -3938,8 +4010,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -3989,10 +4061,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyHtmlNotice(roomId, originalEvent, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4032,7 +4104,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.replyHtmlNotice(roomId, originalEvent, replyHtml), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendNotice', () => {
@@ -4058,8 +4130,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4091,10 +4163,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendNotice(roomId, eventContent.body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4115,7 +4187,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendNotice(roomId, eventContent.body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendHtmlNotice', () => {
@@ -4143,8 +4215,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4178,10 +4250,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendHtmlNotice(roomId, eventContent.formatted_body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4204,7 +4276,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendHtmlNotice(roomId, eventContent.formatted_body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendText', () => {
@@ -4230,8 +4302,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4263,10 +4335,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendText(roomId, eventContent.body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4287,7 +4359,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendText(roomId, eventContent.body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendHtmlText', () => {
@@ -4315,8 +4387,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4350,10 +4422,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendHtmlText(roomId, eventContent.formatted_body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4376,7 +4448,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendHtmlText(roomId, eventContent.formatted_body), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendMessage', () => {
@@ -4403,8 +4475,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4437,10 +4509,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendMessage(roomId, eventPlainContent), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4462,7 +4534,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendMessage(roomId, eventContent), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendEvent', () => {
@@ -4489,8 +4561,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should try to encrypt in encrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should try to encrypt in encrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4524,10 +4596,10 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendEvent(roomId, eventType, eventPlainContent), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
 
-        it('should not try to encrypt in unencrypted rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in unencrypted rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4549,7 +4621,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendEvent(roomId, eventType, eventContent), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendRawEvent', () => {
@@ -4576,8 +4648,8 @@ describe('MatrixClient', () => {
             expect(result).toEqual(eventId);
         });
 
-        it('should not try to encrypt in any rooms', async () => {
-            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", true);
+        it('should not try to encrypt in any rooms', () => testCryptoStores(async (cryptoStoreType) => {
+            const { client, http, hsUrl } = createTestClient(null, "@alice:example.org", cryptoStoreType);
 
             const roomId = "!testing:example.org";
             const eventId = "$something:example.org";
@@ -4599,7 +4671,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.sendRawEvent(roomId, eventType, eventContent), http.flushAllExpected()]);
             expect(result).toEqual(eventId);
-        });
+        }));
     });
 
     describe('sendStateEvent', () => {
@@ -6660,9 +6732,9 @@ describe('MatrixClient', () => {
             }
         });
 
-        it('should call the right endpoint', async () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http } = createTestClient(null, userId, true);
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             // @ts-ignore
             const keys: OTKs = {
@@ -6691,7 +6763,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.uploadDeviceOneTimeKeys(keys), http.flushAllExpected()]);
             expect(result).toMatchObject(counts);
-        });
+        }));
     });
 
     describe('checkOneTimeKeyCounts', () => {
@@ -6707,9 +6779,9 @@ describe('MatrixClient', () => {
             }
         });
 
-        it('should call the right endpoint', async () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http } = createTestClient(null, userId, true);
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             const counts: OTKCounts = {
                 [OTKAlgorithm.Signed]: 12,
@@ -6724,7 +6796,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.checkOneTimeKeyCounts(), http.flushAllExpected()]);
             expect(result).toMatchObject(counts);
-        });
+        }));
     });
 
     describe('getUserDevices', () => {
@@ -6761,9 +6833,9 @@ describe('MatrixClient', () => {
             expect(result).toMatchObject(response);
         });
 
-        it('should call the right endpoint with a default timeout', async () => {
+        it('should call the right endpoint with a default timeout', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http } = createTestClient(null, userId, true);
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             const requestBody = {
                 "@alice:example.org": [],
@@ -6792,7 +6864,7 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.getUserDevices(Object.keys(requestBody)), http.flushAllExpected()]);
             expect(result).toMatchObject(response);
-        });
+        }));
     });
 
     describe('claimOneTimeKeys', () => {
@@ -6808,9 +6880,9 @@ describe('MatrixClient', () => {
             }
         });
 
-        it('should call the right endpoint', async () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http } = createTestClient(null, userId, true);
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             const request = {
                 "@alice:example.org": {
@@ -6846,11 +6918,11 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.claimOneTimeKeys(request), http.flushAllExpected()]);
             expect(result).toMatchObject(response);
-        });
+        }));
 
-        it('should use the timeout parameter', async () => {
+        it('should use the timeout parameter', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http } = createTestClient(null, userId, true);
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             const request = {
                 "@alice:example.org": {
@@ -6888,13 +6960,13 @@ describe('MatrixClient', () => {
 
             const [result] = await Promise.all([client.claimOneTimeKeys(request, timeout), http.flushAllExpected()]);
             expect(result).toMatchObject(response);
-        });
+        }));
     });
 
     describe('sendToDevices', () => {
-        it('should call the right endpoint', async () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http, hsUrl } = createTestClient(null, userId, true);
+            const { client, http, hsUrl } = createTestClient(null, userId, cryptoStoreType);
 
             const type = "org.example.message";
             const messages = {
@@ -6919,13 +6991,13 @@ describe('MatrixClient', () => {
             });
 
             await Promise.all([client.sendToDevices(type, messages), http.flushAllExpected()]);
-        });
+        }));
     });
 
     describe('getOwnDevices', () => {
-        it('should call the right endpoint', async () => {
+        it('should call the right endpoint', () => testCryptoStores(async (cryptoStoreType) => {
             const userId = "@test:example.org";
-            const { client, http } = createTestClient(null, userId, true);
+            const { client, http } = createTestClient(null, userId, cryptoStoreType);
 
             const devices = ["schema not followed for simplicity"];
 
@@ -6936,7 +7008,7 @@ describe('MatrixClient', () => {
 
             const [res] = await Promise.all([client.getOwnDevices(), http.flushAllExpected()]);
             expect(res).toMatchObject(devices);
-        });
+        }));
     });
 
     describe('getRelationsForEvent', () => {

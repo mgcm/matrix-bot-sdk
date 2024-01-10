@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { StoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 
 import {
     Appservice,
@@ -30,13 +31,13 @@ try {
 const dmTarget = creds?.['dmTarget'] ?? "@admin:localhost";
 const homeserverUrl = creds?.['homeserverUrl'] ?? "http://localhost:8008";
 const storage = new SimpleFsStorageProvider("./examples/storage/encryption_appservice.json");
-const crypto = new RustSdkAppserviceCryptoStorageProvider("./examples/storage/encryption_appservice_sled");
+const crypto = new RustSdkAppserviceCryptoStorageProvider("./examples/storage/encryption_appservice_sled", StoreType.Sled);
 const worksImage = fs.readFileSync("./examples/static/it-works.png");
 
 const registration: IAppserviceRegistration = {
     "as_token": creds?.['asToken'] ?? "change_me",
     "hs_token": creds?.['hsToken'] ?? "change_me",
-    "sender_localpart": "crypto_main_bot_user",
+    "sender_localpart": "crypto_main_bot_user2",
     "namespaces": {
         users: [{
             regex: "@crypto.*:localhost",
@@ -94,6 +95,16 @@ const bot = appservice.botIntent;
             ],
         });
     }
+
+    appservice.on("query.key_claim", (req, done) => {
+        LogService.info("index", "Key claim request:", req);
+        done({});
+    });
+
+    appservice.on("query.key", (req, done) => {
+        LogService.info("index", "Key query request:", req);
+        done({});
+    });
 
     appservice.on("room.failed_decryption", async (roomId: string, event: any, e: Error) => {
         LogService.error("index", `Failed to decrypt ${roomId} ${event['event_id']} because `, e);

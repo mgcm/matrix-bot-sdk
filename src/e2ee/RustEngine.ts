@@ -52,7 +52,7 @@ export class RustEngine {
                     await this.processKeysClaimRequest(request);
                     break;
                 case RequestType.ToDevice:
-                    await this.processToDeviceRequest(request);
+                    await this.processToDeviceRequest(request as ToDeviceRequest);
                     break;
                 case RequestType.RoomMessage:
                     throw new Error("Bindings error: Sending room messages is not supported");
@@ -112,6 +112,7 @@ export class RustEngine {
         settings.rotationPeriodMessages = BigInt(encEv.rotationPeriodMessages);
 
         await this.lock.acquire(SYNC_LOCK_NAME, async () => {
+            await this.machine.updateTrackedUsers(members); // just in case we missed some
             await this.runOnly(RequestType.KeysQuery);
             const keysClaim = await this.machine.getMissingSessions(members);
             if (keysClaim) {
@@ -133,7 +134,9 @@ export class RustEngine {
     }
 
     private async processKeysUploadRequest(request: KeysUploadRequest) {
-        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, JSON.parse(request.body));
+        const body = JSON.parse(request.body);
+        // delete body["one_time_keys"]; // use this to test MSC3983
+        const resp = await this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, body);
         await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(resp));
     }
 

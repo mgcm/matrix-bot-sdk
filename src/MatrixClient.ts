@@ -676,7 +676,7 @@ export class MatrixClient extends EventEmitter {
 
         if (createFilter && filter) {
             LogService.trace("MatrixClientLite", "Creating new filter");
-            return this.doRequest("POST", "/_matrix/client/v3/user/" + encodeURIComponent(userId) + "/filter", null, filter).then(async response => {
+            await this.doRequest("POST", "/_matrix/client/v3/user/" + encodeURIComponent(userId) + "/filter", null, filter).then(async response => {
                 this.filterId = response["filter_id"];
                 // noinspection ES6RedundantAwait
                 await Promise.resolve(this.storage.setSyncToken(null));
@@ -721,6 +721,12 @@ export class MatrixClient extends EventEmitter {
                     await Promise.resolve(this.storage.setSyncToken(token));
                 }
             } catch (e) {
+                // If we've requested to stop syncing, don't bother checking the error.
+                if (this.stopSyncing) {
+                    LogService.info("MatrixClientLite", "Client stop requested - cancelling sync");
+                    return;
+                }
+
                 LogService.error("MatrixClientLite", "Error handling sync " + extractRequestError(e));
                 const backoffTime = SYNC_BACKOFF_MIN_MS + Math.random() * (SYNC_BACKOFF_MAX_MS - SYNC_BACKOFF_MIN_MS);
                 LogService.info("MatrixClientLite", `Backing off for ${backoffTime}ms`);
@@ -808,6 +814,9 @@ export class MatrixClient extends EventEmitter {
                 if (event['type'] !== 'm.room.member') continue;
                 if (event['state_key'] !== await this.getUserId()) continue;
 
+                const membership = event["content"]?.["membership"];
+                if (membership !== "leave" && membership !== "ban") continue;
+
                 const oldAge = leaveEvent && leaveEvent['unsigned'] && leaveEvent['unsigned']['age'] ? leaveEvent['unsigned']['age'] : 0;
                 const newAge = event['unsigned'] && event['unsigned']['age'] ? event['unsigned']['age'] : 0;
                 if (leaveEvent && oldAge < newAge) continue;
@@ -855,11 +864,6 @@ export class MatrixClient extends EventEmitter {
 
         // Process rooms we've joined and their events
         for (const roomId in joinedRooms) {
-            if (this.lastJoinedRoomIds.indexOf(roomId) === -1) {
-                await emitFn("room.join", roomId);
-                this.lastJoinedRoomIds.push(roomId);
-            }
-
             const room = joinedRooms[roomId];
 
             if (room['account_data'] && room['account_data']['events']) {
@@ -871,6 +875,13 @@ export class MatrixClient extends EventEmitter {
             if (!room['timeline'] || !room['timeline']['events']) continue;
 
             for (let event of room['timeline']['events']) {
+                if (event['type'] === "m.room.member" && event['state_key'] === await this.getUserId()) {
+                    if (event['content']?.['membership'] === "join" && this.lastJoinedRoomIds.indexOf(roomId) === -1) {
+                        await emitFn("room.join", roomId, await this.processEvent(event));
+                        this.lastJoinedRoomIds.push(roomId);
+                    }
+                }
+
                 event = await this.processEvent(event);
                 if (event['type'] === 'm.room.encrypted' && await this.crypto?.isRoomEncrypted(roomId)) {
                     await emitFn("room.encrypted_event", roomId, event);
@@ -1162,11 +1173,12 @@ export class MatrixClient extends EventEmitter {
     /**
      * Leaves the given room
      * @param {string} roomId the room ID to leave
+     * @param {string=} reason Optional reason to be included as the reason for leaving the room.
      * @returns {Promise<any>} resolves when left
      */
     @timedMatrixClientFunctionCall()
-    public leaveRoom(roomId: string): Promise<any> {
-        return this.doRequest("POST", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/leave", null, {});
+    public leaveRoom(roomId: string, reason?: string): Promise<any> {
+        return this.doRequest("POST", "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/leave", null, { reason });
     }
 
     /**

@@ -50,7 +50,7 @@ jobs:
 
       - name: Create Release Pull Request or Publish Packages
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/nic/main' }}
-        uses: changesets/action@f13b1baaa620fde937751f5d2c3572b9da32af23 # @v1.4.5
+        uses: changesets/action@v1.4.5
         with:
           publish: yarn release
         env:

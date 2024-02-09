@@ -1,0 +1,58 @@
+name: publish
+
+on:
+  push:
+    branches:
+      - nic/main
+  pull_request:
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+          # don't persist the credentials so the changesets action doesn't use the
+          # github actions token but the git token provided via environment variable
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'yarn'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: yarn install
+        run: yarn install --frozen-lockfile
+
+      - name: lint
+        run: yarn lint
+
+      - name: type checking and declarations
+        run: yarn tsc
+
+      - name: test
+        run: yarn test
+
+      - name: build
+        run: yarn build
+
+      - name: Generate GitHub token
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/nic/main' }}
+        id: generate_token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # @v2.1.0
+        with:
+          app_id: ${{ secrets.GH_APP_OS_APP_ID }}
+          private_key: ${{ secrets.GH_APP_OS_PRIVATE_KEY }}
+
+      - name: Create Release Pull Request or Publish Packages
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/nic/main' }}
+        uses: changesets/action@f13b1baaa620fde937751f5d2c3572b9da32af23 # @v1.4.5
+        with:
+          publish: yarn release
+        env:
+          GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}

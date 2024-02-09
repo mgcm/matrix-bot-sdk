@@ -4,6 +4,10 @@
 
 TypeScript/JavaScript SDK for Matrix bots. For help and support, visit [#matrix-bot-sdk:t2bot.io](https://matrix.to/#/#matrix-bot-sdk:t2bot.io)
 
+### Important
+
+This fork pulls in an updated release of [matrix-rust-sdk-crypto-nodejs](https://github.com/matrix-org/matrix-rust-sdk-crypto-nodejs/releases/tag/v0.1.0-beta.12) that has [s390x](https://en.wikipedia.org/wiki/Linux_on_IBM_Z) binary support and also removes `Sled` store support. We will abandon this fork when upstream makes a release that uses it.
+
 # Documentation
 
 Documentation for the project is available [here](https://turt2live.github.io/matrix-bot-sdk/index.html).

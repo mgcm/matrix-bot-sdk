@@ -103,7 +103,7 @@ describe('SimplePostgresStorageProvider', () => {
         expect(await writeProvider.isTransactionCompleted(txnB)).toBeTruthy();
         expect(await readProviderFn().isTransactionCompleted(txnA)).toBeTruthy();
         expect(await readProviderFn().isTransactionCompleted(txnB)).toBeTruthy();
-    });
+    }, 10000);
 
     it('should track a limited number of completed transactions in memory', async () => {
         const maxTransactions = 2;

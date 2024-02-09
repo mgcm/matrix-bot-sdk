@@ -1,17 +1,17 @@
 {
-  "name": "@nordeck/matrix-bot-sdk",
+  "name": "@mgcm/matrix-bot-sdk",
   "version": "0.7.1",
   "description": "TypeScript/JavaScript SDK for Matrix bots and appservices with support for s390x",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nordeck/matrix-bot-sdk"
+    "url": "git+https://github.com/mgcm/matrix-bot-sdk"
   },
-  "author": "turt2live + nordeck",
+  "author": "turt2live + mgcm",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/nordeck/matrix-bot-sdk/issues"
+    "url": "https://github.com/mgcm/matrix-bot-sdk/issues"
   },
-  "homepage": "https://github.com/nordeck/matrix-bot-sdk#readme",
+  "homepage": "https://github.com/mgcm/matrix-bot-sdk#readme",
   "scripts": {
     "prepublishOnly": "yarn build",
     "docs": "jsdoc -c jsdoc.json -P package.json -u docs/tutorials",

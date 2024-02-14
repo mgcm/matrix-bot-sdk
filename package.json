@@ -1,17 +1,17 @@
 {
-  "name": "matrix-bot-sdk",
-  "version": "develop",
-  "description": "TypeScript/JavaScript SDK for Matrix bots and appservices",
+  "name": "@mgcm/matrix-bot-sdk",
+  "version": "0.7.1-crypto.beta12",
+  "description": "TypeScript/JavaScript SDK for Matrix bots and appservices. This is a fork that uses the latest rust crypto bindings that we require for supporting the s390x architecture.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/turt2live/matrix-bot-sdk.git"
+    "url": "git+https://github.com/mgcm/matrix-bot-sdk.git"
   },
-  "author": "turt2live",
+  "author": "turt2live+mgcm",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/turt2live/matrix-bot-sdk/issues"
+    "url": "https://github.com/mgcm/matrix-bot-sdk/issues"
   },
-  "homepage": "https://github.com/turt2live/matrix-bot-sdk#readme",
+  "homepage": "https://github.com/mgcm/matrix-bot-sdk#readme",
   "scripts": {
     "prepublishOnly": "yarn build",
     "docs": "jsdoc -c jsdoc.json -P package.json -u docs/tutorials",

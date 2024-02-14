@@ -52,7 +52,7 @@ describe('MatrixClient', () => {
             const homeserverUrl = "https://example.org";
             const accessToken = "example_token";
 
-            const client = new MatrixClient(homeserverUrl, accessToken, null, new RustSdkCryptoStorageProvider(tmp.dirSync().name, StoreType.Sled));
+            const client = new MatrixClient(homeserverUrl, accessToken, null, new RustSdkCryptoStorageProvider(tmp.dirSync().name, StoreType.Sqlite));
             expect(client.crypto).toBeDefined();
         });
 
@@ -6986,7 +6986,7 @@ describe('MatrixClient', () => {
             http.when("PUT", "/_matrix/client/v3/sendToDevice").respond(200, (path, content) => {
                 const idx = path.indexOf(`${hsUrl}/_matrix/client/v3/sendToDevice/${encodeURIComponent(type)}/`);
                 expect(idx).toBe(0);
-                expect(content).toMatchObject({ messages });
+                expect(content).toMatchObject(messages);
                 return {};
             });
 

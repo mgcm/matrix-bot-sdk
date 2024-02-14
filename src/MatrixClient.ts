@@ -1963,9 +1963,8 @@ export class MatrixClient extends EventEmitter {
     @timedMatrixClientFunctionCall()
     public async sendToDevices(type: string, messages: Record<string, Record<string, any>>): Promise<void> {
         const txnId = (new Date().getTime()) + "_TDEV__inc" + (++this.requestId);
-        return this.doRequest("PUT", `/_matrix/client/v3/sendToDevice/${encodeURIComponent(type)}/${encodeURIComponent(txnId)}`, null, {
-            messages: messages,
-        });
+        const path = `/_matrix/client/v3/sendToDevice/${encodeURIComponent(type)}/${encodeURIComponent(txnId)}`;
+        return this.doRequest("PUT", path, {}, messages);
     }
 
     /**

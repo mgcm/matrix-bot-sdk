@@ -121,9 +121,15 @@ export class RustEngine {
         });
 
         await this.lock.acquire(roomId, async () => {
-            const requests = JSON.parse(await this.machine.shareRoomKey(new RoomId(roomId), members, settings));
-            for (const req of requests) {
-                await this.actuallyProcessToDeviceRequest(req.txn_id, req.event_type, req.messages);
+            const shareMessages: ToDeviceRequest[] = await this.machine.shareRoomKey(
+                new RoomId(roomId),
+                members,
+                settings,
+            );
+            if (shareMessages) {
+                for (const m of shareMessages) {
+                    await this.processToDeviceRequest(m);
+                }
             }
         });
     }
@@ -146,8 +152,8 @@ export class RustEngine {
     }
 
     private async processToDeviceRequest(request: ToDeviceRequest) {
-        const req = JSON.parse(request.body);
-        await this.actuallyProcessToDeviceRequest(req.txn_id, req.event_type, req.messages);
+        const req: { messages: Record<string, Record<string, Record<string, any>>> } = JSON.parse(request.body);
+        await this.actuallyProcessToDeviceRequest(request.txnId, request.eventType, req);
     }
 
     private async actuallyProcessToDeviceRequest(id: string, type: string, messages: Record<string, Record<string, unknown>>) {
